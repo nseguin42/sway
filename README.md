@@ -1,93 +1,87 @@
-# sway
+# autotiling sway #
 
-**[English][en]** - [Deutsch][de] - [Dansk][dk] - [Español][es] - [Français][fr] - [Svenska][sv] - [Ελληνικά][gr] - [Magyar][hu] - [فارسی][ir] - [Italiano][it] - [日本語][ja] - [한국어][ko] - [Nederlands][nl] - [Polski][pl] - [Português][pt] - [Română][ro] - [Русский][ru] - [Türkçe][tr] - [Українська][uk] - [中文-简体][zh-CN] - [中文-繁體][zh-TW]
+This fork contains two small changes to sway's tiling behavior:
 
-sway is an [i3]-compatible [Wayland] compositor. Read the [FAQ]. Join the
-[IRC channel] \(#sway on irc.libera.chat).
+* prevent singletons from nesting
+* alternate split directions when inserting a container (like bspwm)
 
-## Release Signatures
 
-Releases are signed with [E88F5E48] and published [on GitHub][GitHub releases].
+## Flattening details ##
 
-## Installation
+Ideal flattening behavior is hard to pin down, but I've summarized my opinion with this "soft" rule:
 
-### From Packages
+**Soft rule for flattening:** _Containers should either be visible, or the split direction for a visible container._
 
-Sway is available in many distributions. Try installing the "sway" package for
-yours.
+A container is "visible" if it has multiple children. You can look at a group of windows in a horizontal layout and see that they are in a horizontal container. You can also visibly _select_ that container (it looks like selecting all of its children), so we should be able to split it in an arbitrary direction. So at the very least, we need to allow 1 layer of singletons (stuff like H[V[a b c]]).
 
-### Compiling from Source
+A singleton containing a singleton (e.g. `H[H[app]]`) can't be seen. You can only know they exist if you remember creating them (or by experimenting). They're not easy to create, since i3/sway avoid creating them on splits; you have to "back into them" by removing containers, like `H[x V[y]] --> H[V[y]]`. So, they make navigation confusing.
 
-Check out [this wiki page][Development setup] if you want to build the HEAD of
-sway and wlroots for testing or development.
+The outer container doesn't serve any real purpose. It's not telling `app` how to split, it's only telling `app`'s invisible container how to split. So its only possible function is if you want to split `app` vertically but maintain its horizontal direction for future splits:
 
-Install dependencies:
+    focus parent && splitv && insert app2 : H[H[app*]] --> V[H[app] app2*]
+However, the outer container does nothing before this command is run. The result is the exact same layout if we started from `H[app*]`, as H will be put into a new vertical split. 
 
-* meson \*
-* [wlroots]
-* wayland
-* wayland-protocols \*
-* pcre2
-* json-c
-* pango
-* cairo
-* gdk-pixbuf2 (optional: system tray)
-* [scdoc] (optional: man pages) \*
-* git (optional: version info) \*
+It is conceptually and computationally simpler to regard singleton containers as "pending splits," which should exist only at the leaf level, rather than throughout the tree.  We should create them only as-needed (already done), modify their layouts instead of nesting (already done), and destroy them when possible (done in this fork and *sometimes* done in mainline i3/sway, see the next section). Therefore, the "hard rule" for flattening which this fork enforces is:
 
-_\* Compile-time dep_
+**Hard rule for flattening:** _If A and B are singleton containers and A > B > C, squash to A > C._
 
-Run these commands:
+It does so on an as-needed basis whenever a container is moved or removed, by rearranging containers before a singleton is created. When removing a container with a unique sibling:
+  1) If the sibling has an only child, presquash the sibling.
+  
+    A[con, B[nephew]] --(presquash)--> B[nephew, con] --(remove con)--> B[nephew]
+  2) If the sibling will become an only child, presquash the parent.
+  
+    A[B[con, sibling]] --(presquash)--> B[con, sibling] --(remove con)--> B[sibling]
 
-    meson build/
-    ninja -C build/
-    sudo ninja -C build/ install
+## Flattening in mainline i3/sway ## 
+In mainline i3/sway, singleton containers are pruned in two ways:
 
-On systems without logind nor seatd, you need to suid the sway binary:
+* when splitting a singleton container, instead of adding a new container, just change the parent's layout 
+    
+      H[x] -> V[x] instead of H[V[x]]
+* when moving containers, recursively flatten the entire workspace, squashing _alternating_ chains `A > B > A` where `B` is a singleton:
+           
+      H[... V[H[app]] ...] --> H[... app ...], H[a b V[H[c]]] --> H[a b c]
 
-    sudo chmod a+s /usr/local/bin/sway
+This ad hoc approach is a bit mysterious. Since it only cares if the middle container is a singleton, it has unexpected results (see Example 1). It's also only done to the target workspace when *moving* a split, but not the origin workspace or when *killing/removing* a split. It's also done recursively to the entire workspace, instead of only to the small neighborhood of containers which are affected by a single move. Since it doesn't flatten singleton chains unless they're alternating, you can easily inflate your tree by accident (see example 2).
 
-Sway will drop root permissions shortly after startup.
 
-## Configuration
 
-If you already use i3, then copy your i3 config to `~/.config/sway/config` and
-it'll work out of the box. Otherwise, copy the sample configuration file to
-`~/.config/sway/config`. It is usually located at `/etc/sway/config`.
-Run `man 5 sway` for information on the configuration.
+## Example 1 ##
+### starting layout: H[V[a* H[b c]] d] ###
+![layout 1: V[a H[V[b* H[c d]] e]]](https://github.com/nseguin42/sway/blob/master/demos/layout_A_start.png)
 
-## Running
+### after 'move down' in mainline i3/sway: H[b a* c d] ### 
+![layout 1 after 'move down' in mainline](https://github.com/nseguin42/sway/blob/master/demos/layout_A_post_mainline.png)
+Notice that `d` has been resized, even though we only moved `a` within a branch which does not include `d`!
 
-Run `sway` from a TTY. Some display managers may work but are not supported by
-sway (gdm is known to work fairly well).
+### after 'move down' in this fork: H[H[b a* c] d]
+![layout 1 after 'move down' in this fork](https://github.com/nseguin42/sway/blob/master/demos/layout_A_post_fork.png)
 
-[en]: https://github.com/swaywm/sway#readme
-[de]: README.de.md
-[dk]: README.dk.md
-[es]: README.es.md
-[fr]: README.fr.md
-[sv]: README.sv.md
-[gr]: README.gr.md
-[hu]: README.hu.md
-[ir]: README.ir.md
-[it]: README.it.md
-[ja]: README.ja.md
-[ko]: README.ko.md
-[nl]: README.nl.md
-[pl]: README.pl.md
-[pt]: README.pt.md
-[ro]: README.ro.md
-[ru]: README.ru.md
-[tr]: README.tr.md
-[uk]: README.uk.md
-[zh-CN]: README.zh-CN.md
-[zh-TW]: README.zh-TW.md
-[i3]: https://i3wm.org/
-[Wayland]: http://wayland.freedesktop.org/
-[FAQ]: https://github.com/swaywm/sway/wiki
-[IRC channel]: https://web.libera.chat/gamja/?channels=#sway
-[E88F5E48]: https://keys.openpgp.org/search?q=34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48
-[GitHub releases]: https://github.com/swaywm/sway/releases
-[Development setup]: https://github.com/swaywm/sway/wiki/Development-Setup
-[wlroots]: https://gitlab.freedesktop.org/wlroots/wlroots
-[scdoc]: https://git.sr.ht/~sircmpwn/scdoc
+
+## Example 2 ##
+The unsquashed containers in mainline i3/sway arise from doing `kill x : A[x B[y]] --> A[B[y]]`. Here's a simple example of how this can lead to artifically inflated trees, especially when using a script that automatically alternates split directions.
+### an alternating layout ###
+![layout 2](https://github.com/nseguin42/sway/blob/master/demos/layout_B_start.png)
+### after killing the non-container sibling in each layer in mainline ###
+![layout 2 after killing in a specific order in mainline](https://github.com/nseguin42/sway/blob/master/demos/layout_B_post_mainline.png)
+### after killing the non-container sibling in each layer in this fork ###
+![layout 2 after killing in a specific order in fork](https://github.com/nseguin42/sway/blob/master/demos/layout_B_post_fork.png)
+
+## More examples of internal/invisible flattening ##
+  
+* H[H1[V[x y z]]] -> H[V[x y z]] 
+
+      Singletons: H > H1, H1 > V
+      Chains: H > H1 > V --> H > V
+  
+* H[V1[H1[V2[H2[x y]] z]]] -> H[V2[H2[x y]] z]
+
+      Singletons: H > V1, V1 > H1, H1 > V2, V2 > H2
+      Chains: H > V1 > H1 > V2 --> H > V2
+
+* V1[a H1[V2[H2[b c]]] d] -> V1[a H1[H2[b c]] d]
+ 
+      Singletons: H1 > V2, V2 > H2
+      Chains: H1 > V2 > H2 --> H1 > H2
+
