@@ -374,4 +374,6 @@ void container_presquash(struct sway_container *con);
 
 bool container_is_split(struct sway_container *con);
 
+void container_split_long_side(struct sway_container *con);
+
 #endif

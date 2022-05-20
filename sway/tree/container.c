@@ -871,6 +871,7 @@ void container_set_floating(struct sway_container *container, bool enable) {
 			seat_get_focus_inactive_tiling(seat, workspace);
 		if (reference) {
 			if (reference->view) {
+        container_split_long_side(reference);
 				container_add_sibling(reference, container, 1);
 			} else {
 				container_add_child(reference, container);
@@ -1825,4 +1826,14 @@ void container_presquash(struct sway_container *con) {
   } 
 
   return;
+}
+
+void container_split_long_side (struct sway_container *con) {
+  if (container_is_split(con)) {
+    if (con->pending.width >= con->pending.height) {
+      container_split(con, L_HORIZ);
+    } else {
+      container_split(con, L_VERT);
+    }
+  }
 }
