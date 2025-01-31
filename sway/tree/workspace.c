@@ -1121,13 +1121,6 @@ size_t workspace_num_sticky_containers(struct sway_workspace *ws) {
 	return count;
 }
 
-void workspace_squash(struct sway_workspace *workspace) {
-	for (int i = 0; i < workspace->tiling->length; i++) {
-		struct sway_container *child = workspace->tiling->items[i];
-		i += container_squash(child);
-	}
-}
-
 void workspace_move_to_output(struct sway_workspace *workspace,
 		struct sway_output *output) {
 	if (workspace->output == output) {
