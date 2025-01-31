@@ -348,7 +348,9 @@ bool container_is_sticky_or_child(struct sway_container *con);
 
 bool container_is_split(struct sway_container *con);
 
-/* 
+void container_split_long_side(struct sway_container *con);
+
+/*
 If A and B are singleton containers and A > B > C, we should flatten to A > C.
 Before moving con, check if it has a unique sibling which will become a singleton.
 1) If the sibling has an only child, squash the sibling.
