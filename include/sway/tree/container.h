@@ -346,18 +346,19 @@ bool container_is_sticky(struct sway_container *con);
 
 bool container_is_sticky_or_child(struct sway_container *con);
 
-/**
- * This will destroy pairs of redundant H/V splits
- * e.g. H[V[H[app app]] app] -> H[app app app]
- * The middle "V[H[" are eliminated by a call to container_squash
- * on the V[ con. It's grandchildren are added to its parent.
- *
- * This function is roughly equivalent to i3's tree_flatten here:
- * https://github.com/i3/i3/blob/1f0c628cde40cf87371481041b7197344e0417c6/src/tree.c#L651
- *
- * Returns the number of new containers added to the parent
- */
-int container_squash(struct sway_container *con);
+bool container_is_split(struct sway_container *con);
+
+/* 
+If A and B are singleton containers and A > B > C, we should flatten to A > C.
+Before moving con, check if it has a unique sibling which will become a singleton.
+1) If the sibling has an only child, squash the sibling.
+  A[con, B[nephew]] --> B[nephew, con] --(kill con)--> A[nephew]
+2) If the sibling will become an only child, squash the parent.
+  A[B[con, sibling]] --> B[con, sibling] --(kill con)--> B[sibling]
+*/
+void container_presquash(struct sway_container *con);
+
+bool container_is_split(struct sway_container *con);
 
 void container_arrange_title_bar(struct sway_container *con);
 

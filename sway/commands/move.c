@@ -123,6 +123,7 @@ static void container_move_to_container_from_direction(
 			container_update_representation(container);
 		} else {
 			sway_log(SWAY_DEBUG, "Promoting to sibling of cousin");
+      container_presquash(container);
 			int offset =
 				move_dir == WLR_DIRECTION_LEFT || move_dir == WLR_DIRECTION_UP;
 			int index = container_sibling_index(destination) + offset;
@@ -134,7 +135,6 @@ static void container_move_to_container_from_direction(
 			}
 			container->pending.width = container->pending.height = 0;
 			container->width_fraction = container->height_fraction = 0;
-			workspace_squash(destination->pending.workspace);
 		}
 		return;
 	}
@@ -144,10 +144,10 @@ static void container_move_to_container_from_direction(
 		int index =
 			move_dir == WLR_DIRECTION_RIGHT || move_dir == WLR_DIRECTION_DOWN ?
 			0 : destination->pending.children->length;
+    container_presquash(container);
 		container_insert_child(destination, container, index);
 		container->pending.width = container->pending.height = 0;
 		container->width_fraction = container->height_fraction = 0;
-		workspace_squash(destination->pending.workspace);
 		return;
 	}
 
@@ -380,6 +380,7 @@ static bool container_move_in_direction(struct sway_container *container,
 	}
 
 	if (target) {
+    container_presquash(container);
 		// Container will move in with its cousin
 		container_move_to_container_from_direction(container,
 				target, move_dir);
@@ -408,7 +409,6 @@ static bool container_move_in_direction(struct sway_container *container,
 		if (old_parent) {
 			container_reap_empty(old_parent);
 		}
-		workspace_squash(container->pending.workspace);
 		return true;
 	}
 }

@@ -1702,66 +1702,71 @@ bool container_is_sticky_or_child(struct sway_container *con) {
 	return container_is_sticky(container_toplevel_ancestor(con));
 }
 
-static bool is_parallel(enum sway_container_layout first,
-		enum sway_container_layout second) {
-	switch (first) {
-	case L_TABBED:
-	case L_HORIZ:
-		return second == L_TABBED || second == L_HORIZ;
-	case L_STACKED:
-	case L_VERT:
-		return second == L_STACKED || second == L_VERT;
-	default:
-		return false;
-	}
+bool container_is_split(struct sway_container *con) {
+  if (con->view) {
+    enum sway_container_layout layout = container_parent_layout(con);
+    return (layout  == L_HORIZ || layout == L_VERT);
+  } else {
+    enum sway_container_layout layout = con->pending.layout;
+    return (layout  == L_HORIZ || layout == L_VERT);
+  }
 }
 
-static bool container_is_squashable(struct sway_container *con,
-		struct sway_container *child) {
-	enum sway_container_layout gp_layout = container_parent_layout(con);
-	return (con->pending.layout == L_HORIZ || con->pending.layout == L_VERT) &&
-		(child->pending.layout == L_HORIZ || child->pending.layout == L_VERT) &&
-		!is_parallel(con->pending.layout, child->pending.layout) &&
-		is_parallel(gp_layout, child->pending.layout);
-}
+// If removing con will create a singleton containing/contained in a singleton, flatten:
+// A[con, B[nephew]] --> A[nephew] or A[B[con, nephew]] --> B[nephew]
+void container_presquash(struct sway_container *con) {
+  struct sway_container *parent = con->pending.parent;
+  list_t *siblings = container_get_siblings(con);
 
-static void container_squash_children(struct sway_container *con) {
-	for (int i = 0; i < con->pending.children->length; i++) {
-		struct sway_container *child = con->pending.children->items[i];
-		i += container_squash(child);
-	}
-}
+  // Attempt to presquash the highest level container which is removed by container_reap_empty
+  // This should go up at most one level, since singletons shouldn't be nested when this runs.
+  while (parent && siblings->length == 1) {
+    con = parent;
+    siblings = container_get_siblings(con);
+    parent = con->pending.parent;
+  }
 
-int container_squash(struct sway_container *con) {
-	if (!con->pending.children) {
-		return 0;
-	}
-	if (con->pending.children->length != 1) {
-		container_squash_children(con);
-		return 0;
-	}
-	struct sway_container *child = con->pending.children->items[0];
-	int idx = container_sibling_index(con);
-	int change = 0;
-	if (container_is_squashable(con, child)) {
-		// con and child are a redundant H/V pair. Destroy them.
-		while (child->pending.children->length) {
-			struct sway_container *current = child->pending.children->items[0];
-			container_detach(current);
-			if (con->pending.parent) {
-				container_insert_child(con->pending.parent, current, idx);
-			} else {
-				workspace_insert_tiling_direct(con->pending.workspace, current, idx);
-			}
-			change++;
-		}
-		// This will also destroy con because child was its only child
-		container_reap_empty(child);
-		change--;
-	} else {
-		container_squash_children(con);
-	}
-	return change;
+  if (siblings->length != 2) {
+    return;
+  }
+
+  int idX = container_sibling_index(con);
+  struct sway_container *sibling = siblings->items[1-idX];
+  struct sway_workspace *ws = con->pending.workspace;
+
+  // CASE 1: sibling has an only child                         A[con, B[nephew]]
+  if (!sibling->view && container_is_split(sibling) && sibling->pending.children->length == 1) {
+    sway_log(SWAY_DEBUG, "Presquashing in case 1");
+    struct sway_container *nephew = sibling->pending.children->items[0];
+    // replace sibling with nephew                                A[con, nephew]
+    container_replace(sibling, nephew);
+    sibling = nephew;
+  }
+
+  // CASE 2: sibling's parent is an only child                A[B[con, sibling]]
+  if (parent && container_is_split(parent) && 
+    container_get_siblings(parent)->length == 1) {
+    sway_log(SWAY_DEBUG, "Presquashing in case 2");
+    struct sway_container *grandparent = parent->pending.parent;
+    if (grandparent && container_is_split(grandparent)) {
+      // replace grandparent with parent                        B[con, sibling]]
+      container_replace(grandparent, parent);
+    } else if (ws && ws->tiling) {
+      // change layout of workspace to B                      B[B[con, sibling]]
+      ws->layout = parent->pending.layout;
+      // move sibling and con up to siblings of parent      B[con, sibling, B[]]
+      while (parent->pending.children->length) {
+        struct sway_container *current = parent->pending.children->items[0];
+        container_detach(current);
+        workspace_insert_tiling_direct(ws, current, 0);
+      }
+      // destroy empty parent                                    B[con, sibling]
+      container_detach(parent);
+      container_begin_destroy(parent);
+    }
+  } 
+
+  return;
 }
 
 static void swap_places(struct sway_container *con1,

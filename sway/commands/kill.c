@@ -8,6 +8,7 @@
 
 static void close_container_iterator(struct sway_container *con, void *data) {
 	if (con->view) {
+    container_presquash(con);
 		view_close(con->view);
 	}
 }
